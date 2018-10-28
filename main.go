@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/csv"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -109,30 +110,54 @@ type Place struct {
 }
 
 func main() {
-	key := "AIzaSyDU2lS2lq1UH6a0Cm8rP3joR9Cp8tRYUxs"
-	location := "24.796074,46.669509"
-	radius := "30000"
-	placeSearch, err := findResturants("فوال", key, location, radius)
-	if err != nil {
-		fmt.Errorf(err.Error())
+	key := flag.String("key", "", "your google maps api key")
+	location := flag.String("location", "24.796074,46.669509", "the central location point you want to look around it")
+	radius := flag.String("radius", "3000", "the radius you want to search around the central location point in meters")
+	name := flag.String("name", "", "the place keywork you are looking for")
+
+	if *key == "" {
+		log.Fatal("No key provided")
 	}
-	placeId := placeSearch.Results[0].PlaceID
-	result, _ := resturantDetails(placeId, key)
-	resturant := Place{Name: placeSearch.Results[0].Name, Rating: result.Result.Rating, NumReviews: "1", Latitude: placeSearch.Results[0].Geometry.Location.Lat, Longitude: placeSearch.Results[0].Geometry.Location.Lng}
-	file, err := os.OpenFile("test.csv", os.O_CREATE|os.O_WRONLY, 0777)
+	if *name == "" {
+		log.Fatal("No place name provided")
+	}
+
+	placeSearch, err := findPlaces(*name, *key, *location, *radius)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	if len(placeSearch.Results) == 0 {
+		fmt.Println("no results")
+		os.Exit(0)
+	}
+
+	file, err := os.OpenFile("data.csv", os.O_CREATE|os.O_WRONLY, 0777)
+	if err != nil {
+		log.Fatal("faild opening data.csv file")
+	}
 	defer file.Close()
-	
-	if err != nil {
-		os.Exit(1)
-	}
 	w := csv.NewWriter(file)
-	if err := w.Write(resturant.ToString()); err != nil {
-		log.Fatalln("error writing record to csv:", err)
+
+	results := placeSearch.Results
+	for _, result := range results {
+		placeDetails, err := placeDetails(result.PlaceID, *key)
+		if err != nil {
+			fmt.Errorf(err.Error())
+		}
+		resturant := Place{Name: result.Name,
+			Rating:     placeDetails.Result.Rating,
+			NumReviews: "1",
+			Latitude:   result.Geometry.Location.Lat,
+			Longitude:  result.Geometry.Location.Lng,
+		}
+		if err := w.Write(resturant.ToString()); err != nil {
+			fmt.Errorf("Error while writing to file (err=%s)", err.Error())
+		}
+		w.Flush()
 	}
-	w.Flush()
 }
 
-func findResturants(keyword string, key string, location string, radius string) (*PlaceSearch, error) {
+func findPlaces(keyword string, key string, location string, radius string) (*PlaceSearch, error) {
 	var api *url.URL
 	api, err := url.Parse("https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=" + location + "&radius=" + radius + "&type=restaurant&keyword=" + keyword + "&key=" + key)
 	if err != nil {
@@ -155,7 +180,7 @@ func findResturants(keyword string, key string, location string, radius string) 
 	return &place, nil
 }
 
-func resturantDetails(placeId string, key string) (*PlaceDetails, error) {
+func placeDetails(placeId string, key string) (*PlaceDetails, error) {
 	var api *url.URL
 	api, err := url.Parse("https://maps.googleapis.com/maps/api/place/details/json?placeid=" + placeId + "&key=" + key)
 	if err != nil {
